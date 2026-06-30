@@ -1,0 +1,23 @@
+# Secrets — never commit real credentials
+.env
+*.env
+!.env.example
+~/.hermes/.env
+
+# Node / dashboard
+node_modules/
+dist/
+.next/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+
+# Local Hermes runtime data (if ever copied into the repo for inspection)
+hermes/runtime/

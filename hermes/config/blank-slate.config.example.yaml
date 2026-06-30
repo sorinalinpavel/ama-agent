@@ -1,0 +1,53 @@
+# AMA — scoped "Blank Slate" starter config (TEMPLATE / EXAMPLE)
+#
+# ⚠️  DO NOT copy this verbatim into ~/.hermes/config.yaml yet.
+# The exact keys and structure MUST be validated against the installed Hermes
+# version during Phase 1 (run `hermes config ...`, `hermes tools`, and check the
+# generated config.yaml). The values below reflect the documented model and are
+# here to express *intent*: start locked-down, expand deliberately.
+#
+# Reference: https://github.com/nousresearch/hermes-agent
+#            ~/.hermes/config.yaml (settings) and ~/.hermes/.env (secrets)
+
+# --- Brain / model ---
+# Default: a LOCAL model served by Ollama (free, private, offline).
+# Set via `hermes model` or `hermes config set model ...`.
+# 1. Install Ollama, then pull a capable tool-calling model, e.g.:
+#       ollama pull <model>          # chosen in Phase 1 based on Mac RAM
+# 2. Point Hermes at the local Ollama endpoint (default http://localhost:11434).
+# 3. IMPORTANT: Hermes wants >=64k context. Ollama often defaults to 4k-8k —
+#    raise num_ctx (via a Modelfile or per-request option) or the agent loop
+#    (system prompt + tools + memory) will overflow.
+model: ollama/<model>                 # validated in Phase 1
+# ollama_base_url: http://localhost:11434   # confirm exact key name in Hermes
+# num_ctx: 65536                            # confirm where Hermes sets this
+
+# --- Initial scope: near-zero capability ---
+# Blank Slate keeps everything off except the bare minimum. We start with only
+# the CLI platform enabled and a minimal toolset, then GRANT more from the
+# dashboard as trust grows.
+agent:
+  disabled_toolsets:
+    - browser
+    - image_generation
+    # ... everything not explicitly needed starts disabled.
+
+platform_toolsets:
+  cli:
+    - file_operations   # read/write within allowed paths
+    - terminal          # gated behind manual approval (see approvals)
+
+# --- Approvals: ask before anything risky ---
+approvals:
+  mode: manual          # manual | smart | off  — start at `manual`
+  timeout_seconds: 60
+  cron_mode: deny       # don't let scheduled tasks act unattended at first
+
+# --- Gateway (Phase 3): refuse to act until an allowlist is set ---
+# Remote channel is a pluggable adapter, TBD (Signal / own-UI-over-Tailscale /
+# Discord). Telegram is NOT used. Whichever is chosen gets an allowlist of ONLY
+# the owner.
+# gateway:
+#   <channel>:
+#     allowlist:
+#       - "<your-user-id>"
