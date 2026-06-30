@@ -12,6 +12,7 @@ import { speak as webSpeak, stopSpeaking as webStop } from "./speak";
 
 const MODEL = "onnx-community/Kokoro-82M-v1.0-ONNX";
 const VOICE = "af_heart"; // warm, natural American female; many others available
+const SPEED = 1.25; // >1 = faster; default 1.0 felt too slow
 
 let ttsPromise: Promise<KokoroTTS> | null = null;
 let useFallback = false;
@@ -125,7 +126,7 @@ async function processQueue() {
 async function playKokoro(text: string) {
   const tts = await loadKokoro();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const out: any = await tts.generate(text, { voice: VOICE });
+  const out: any = await tts.generate(text, { voice: VOICE, speed: SPEED });
   const pcm: Float32Array = out.audio ?? out.data;
   const rate: number = out.sampling_rate ?? 24000;
   await playPCM(pcm, rate);
