@@ -3,6 +3,7 @@
 // the browser; nothing audio-related ever leaves the machine.
 
 import { pipeline, type AutomaticSpeechRecognitionPipeline } from "@huggingface/transformers";
+import { nlog } from "../audio/tts";
 
 // base.en = noticeably better word accuracy than tiny.en, still fast on M4.
 const MODEL = "Xenova/whisper-base.en";
@@ -26,8 +27,16 @@ export function preloadSTT(): Promise<AutomaticSpeechRecognitionPipeline> {
 
 /** Transcribe 16kHz mono Float32 audio to text. */
 export async function transcribe(audio: Float32Array): Promise<string> {
-  const transcriber = await preloadSTT();
-  const out = await transcriber(audio);
-  const text = Array.isArray(out) ? out[0]?.text : out?.text;
-  return (text ?? "").trim();
+  nlog(`transcribe start (samples=${audio.length})`);
+  try {
+    const transcriber = await preloadSTT();
+    const out = await transcriber(audio);
+    const text = Array.isArray(out) ? out[0]?.text : out?.text;
+    const t = (text ?? "").trim();
+    nlog(`transcribe -> "${t}"`);
+    return t;
+  } catch (e) {
+    nlog(`transcribe FAILED: ${(e as Error)?.message ?? e}`);
+    throw e;
+  }
 }

@@ -90,3 +90,41 @@ Ollama + local tools), and treat any cloud brain as an optional swap-*up*.
 **Why:** No lock-in, no recurring cost, works offline. Because Hermes is local +
 multi-provider and our brain/tools are config-driven layers, moving to/from a
 cloud API later is a config change, not a rewrite.
+
+### 2026-06-30 — Coding/PR via "AMA → terminal → Claude Code" (noted; later phase)
+**Decision (planned, not yet built):** For real coding work (e.g. "build a feature
+and open a PR"), AMA does NOT write the code with the local 8B. Instead AMA acts as
+an orchestrator that runs **Claude Code** in a terminal (scoped to this repo) to do
+the coding + git + PR, with a **reviewer agent** (a second Claude Code or a
+different model via a Hermes sub-agent) checking the diff before the PR is raised.
+**Why:** plays to strengths — local 8B = cheap orchestrator/voice; Claude Code =
+strong coder. Notably this is the ONE path that uses the user's **Claude Max**
+subscription (Claude Code runs on Max — no extra API cost), even though Max can't
+power the Ollama brain.
+**Implications / guardrails (load-bearing):** this lets a weak local model trigger
+an autonomous agent that edits code and pushes to GitHub, so it MUST be gated:
+Terminal is HIGH-risk (off by default); scope Claude Code's working dir to this
+repo; never push to main (PR branches only); require the user's approval before the
+PR is actually raised; keep the reviewer step; don't blanket-skip Claude Code's own
+permissions. Make the invocation a fixed skill/script, not freeform 8B improvisation.
+**Prerequisites:** repo must be `git init`'d with a GitHub remote + auth (`gh`/token)
+— not done yet. Build this AFTER Hermes (it needs Hermes's Terminal tool + permissions).
+
+### 2026-06-30 — Native (Tauri/WKWebView) ML & networking constraints (hard-won)
+**Findings while wrapping the app in Tauri (macOS WKWebView):**
+- **Ollama from the webview fails** — POST `/api/chat` hangs/streams nothing
+  (CORS/streaming limits). Fix: call Ollama from **Rust** (`reqwest`) via
+  `#[tauri::command]` (`ollama_chat`, `ollama_tags`) and `invoke()` from JS. The
+  webview `fetch` path is kept only for running in a plain browser.
+- **Two neural models can't share the webview engine.** Whisper STT + Silero VAD
+  (onnxruntime wasm) and Kokoro TTS conflict: Kokoro on **WebGPU hangs at
+  `generate()`**, Kokoro on **wasm breaks Whisper/VAD listening**. Current
+  stopgap: in the native app, disable Kokoro and use the **system voice**
+  (`speechSynthesis`) — robotic but doesn't touch the wasm engine, so listening
+  works. **Proper fix (planned):** move Kokoro TTS and `whisper.cpp` STT **into
+  the Rust backend** so the webview runs neither — natural voice AND good
+  recognition, no contention.
+- **Mic in WKWebView** needs `NSMicrophoneUsageDescription` (src-tauri/Info.plist)
+  + audio-input entitlement; then getUserMedia works.
+- **Audio playback** starts suspended — call `AudioContext.resume()` inside a user
+  gesture (`unlockAudio()` on mic-tap/send).

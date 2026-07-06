@@ -32,6 +32,7 @@ interface Props {
   connected: boolean;
   amaSpeaking: boolean;
   voiceLoading: boolean;
+  voiceLevel: number;
 }
 
 export function Console({
@@ -56,6 +57,7 @@ export function Console({
   connected,
   amaSpeaking,
   voiceLoading,
+  voiceLevel,
 }: Props) {
   // Continuous conversation: auto-send on pause. Half-duplex — the mic is paused
   // while AMA is speaking (amaSpeaking) so she doesn't hear and interrupt herself.
@@ -91,9 +93,10 @@ export function Console({
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
-        gap: 26,
-        padding: 24,
+        justifyContent: "flex-start",
+        overflowY: "auto",
+        gap: 18,
+        padding: "24px 24px 32px",
         animation: "floatUp .6s ease both",
       }}
     >
@@ -163,7 +166,7 @@ export function Console({
         </p>
       </div>
 
-      <Reactor listening={listening} />
+      <Reactor listening={listening} speaking={amaSpeaking} level={voiceLevel} />
 
       {/* AMA's answer (streams in, and is spoken aloud) */}
       {showReply && (
@@ -279,7 +282,7 @@ export function Console({
             }}
           >
             <div>HOST&nbsp;&nbsp;mac-mini · m4</div>
-            <div>BRAIN&nbsp;&nbsp;{connected ? "ollama · local" : "offline"}</div>
+            <div>BRAIN&nbsp;&nbsp;{connected ? "hermes · gemini" : "offline"}</div>
           </div>
           <div
             style={{

@@ -1,9 +1,75 @@
 // The AMA "reactor" — animated presence orb: volumetric halo, flat HUD rings,
 // a 3D gyroscope (3 counter-rotating rings), a living eye core (iris/pupil that
 // looks around + dilates), ambient particles, and listening pulse rings.
-const play = { animationPlayState: "var(--anim,running)" } as const;
+import { useEffect, useRef, useState } from "react";
 
-export function Reactor({ listening }: { listening: boolean }) {
+const play = { animationPlayState: "var(--anim,running)" } as const;
+const BAR_COUNT = 64;
+
+// Circular equalizer that opens around the orb while AMA speaks. Self-animates
+// with traveling waves; `level` (real audio amplitude, when available) scales it.
+function WaveBars({ speaking, level }: { speaking: boolean; level: number }) {
+  const [bars, setBars] = useState<number[]>(() => new Array(BAR_COUNT).fill(0));
+  const levelRef = useRef(0);
+  levelRef.current = level;
+  useEffect(() => {
+    if (!speaking) {
+      setBars(new Array(BAR_COUNT).fill(0));
+      return;
+    }
+    let raf = 0;
+    let t = 0;
+    const loop = () => {
+      t += 0.09;
+      const lvl = levelRef.current;
+      const next = new Array(BAR_COUNT);
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const w =
+          (0.5 + 0.5 * Math.sin(t * 2.1 + i * 0.5)) *
+          (0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * 3.7 - i * 0.27)));
+        next[i] = 0.08 + w * (0.5 + 0.5 * lvl);
+      }
+      setBars(next);
+      raf = requestAnimationFrame(loop);
+    };
+    loop();
+    return () => cancelAnimationFrame(raf);
+  }, [speaking]);
+  return (
+    <div style={{ position: "absolute", inset: 0, margin: "auto", width: 0, height: 0, zIndex: 1, pointerEvents: "none" }}>
+      {bars.map((h, i) => (
+        <div
+          key={i}
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 3,
+            height: 6 + h * 48,
+            marginLeft: -1.5,
+            borderRadius: 3,
+            background: "var(--ac,#3dff99)",
+            boxShadow: `0 0 ${4 + h * 9}px var(--ac,#3dff99)`,
+            transformOrigin: "center top",
+            transform: `rotate(${(360 / BAR_COUNT) * i}deg) translateY(150px)`,
+            opacity: speaking ? 0.92 : 0,
+            transition: "opacity .3s ease",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+export function Reactor({
+  listening,
+  speaking = false,
+  level = 0,
+}: {
+  listening: boolean;
+  speaking?: boolean;
+  level?: number;
+}) {
   return (
     <div
       style={{
@@ -13,7 +79,7 @@ export function Reactor({ listening }: { listening: boolean }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        transform: listening ? "scale(1.07)" : "scale(1)",
+        transform: `scale(${listening ? 1.07 : 1})`,
         transition: "transform .85s cubic-bezier(.34,1.5,.5,1)",
       }}
     >
@@ -208,6 +274,8 @@ export function Reactor({ listening }: { listening: boolean }) {
           />
         </>
       )}
+
+      <WaveBars speaking={speaking} level={level} />
 
       {/* living eye core */}
       <div

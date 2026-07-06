@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AGENTS, PERMISSIONS } from "./data";
 import { DEFAULT_ACCENT } from "./theme";
 import type { Agent, Permission } from "./types";
 import { deriveAgents, derivePerms, greetingFor } from "./view";
-import { chat, listModels, systemPrompt, type ChatMessage } from "./brain/ollama";
-import { enqueueSpeech, stopSpeech, onTTSSpeaking, onVoiceLoading, preloadTTS } from "./audio/tts";
+import { hasHermes, hermesChat } from "./brain/hermes";
+import { enqueueSpeech, stopSpeech, onTTSSpeaking, onVoiceLoading, onTTSLevel, preloadTTS, unlockAudio } from "./audio/tts";
 import { Header } from "./components/Header";
 import { BootLoader } from "./components/BootLoader";
 import { Background } from "./components/Background";
@@ -33,17 +33,16 @@ export function App() {
   const [agents, setAgents] = useState<Agent[]>(AGENTS);
   const [perms, setPerms] = useState<Permission[]>(PERMISSIONS);
 
-  // ----- Brain (local Ollama) state -----
-  const [model, setModel] = useState<string>("");
-  const [connected, setConnected] = useState(false);
-  const [history, setHistory] = useState<ChatMessage[]>([]);
+  // ----- Brain: Hermes → Gemini -----
+  const connected = hasHermes;
+  const model = hasHermes ? "gemini · hermes" : "";
   const [reply, setReply] = useState(""); // live streaming assistant text
   const [youSaid, setYouSaid] = useState(""); // last thing the user said/typed
   const [thinking, setThinking] = useState(false);
   const [speakReplies, setSpeakReplies] = useState(true);
   const [amaSpeaking, setAmaSpeaking] = useState(false); // TTS playing → pause mic
-  const [voiceLoading, setVoiceLoading] = useState(false); // neural voice downloading
-  const abortRef = useRef<AbortController | null>(null);
+  const [voiceLoading, setVoiceLoading] = useState(false);
+  const [voiceLevel, setVoiceLevel] = useState(0); // AMA's live speech amplitude
 
   // Clock.
   useEffect(() => {
@@ -67,80 +66,34 @@ export function App() {
     };
   }, []);
 
-  // Route TTS speaking/loading state into App, and start downloading the neural
-  // voice in the background NOW so it's ready before the first reply (no wait
-  // when AMA actually speaks). Safe to preload: Kokoro runs on WebGPU, a separate
-  // engine from Whisper's wasm STT, so they don't interfere.
+  // Wire TTS state callbacks into the UI.
   useEffect(() => {
     onTTSSpeaking(setAmaSpeaking);
     onVoiceLoading(setVoiceLoading);
+    onTTSLevel(setVoiceLevel);
     preloadTTS();
   }, []);
 
-  // Discover the live local model from Ollama (and reconnect-poll while down).
-  useEffect(() => {
-    let stop = false;
-    const find = async () => {
-      const models = await listModels();
-      if (stop) return;
-      if (models.length) {
-        // Prefer a llama3.1:8b if present, else the first available.
-        const preferred =
-          models.find((m) => m.includes("llama3.1:8b")) ?? models[0];
-        setModel(preferred);
-        setConnected(true);
-      } else {
-        setConnected(false);
-      }
-    };
-    find();
-    const poll = setInterval(find, 5000);
-    return () => {
-      stop = true;
-      clearInterval(poll);
-    };
-  }, []);
 
   const toggleAgent = (i: number) =>
     setAgents((s) => s.map((a, idx) => (idx === i ? { ...a, on: !a.on } : a)));
   const togglePerm = (i: number) =>
     setPerms((s) => s.map((p, idx) => (idx === i ? { ...p, on: !p.on } : p)));
 
-  // Ask AMA: stream the answer from the local model, then speak it.
+  // Ask AMA via Hermes → Gemini. Speak each sentence as the reply streams so she
+  // reads it out directly instead of waiting for the whole answer.
   const ask = async (text: string) => {
     const q = text.trim();
     if (!q || thinking) return;
+    unlockAudio();
     setInput("");
-    setYouSaid(q); // show exactly what was captured/sent
-    stopSpeech(); // cut any previous reply still being spoken
+    setYouSaid(q);
+    stopSpeech();
 
     const doSpeak = speakReplies;
-
-    if (!connected || !model) {
-      const msg =
-        "I can't reach my local brain yet. Make sure Ollama is running (brew services start ollama).";
-      setReply(msg);
-      if (doSpeak) enqueueSpeech(msg);
-      return;
-    }
-
-    const userMsg: ChatMessage = { role: "user", content: q };
-    const ctx = [...history, userMsg];
-    setHistory(ctx);
     setReply("");
     setThinking(true);
 
-    const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt(model) },
-      ...ctx,
-    ];
-
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    // Speak sentence-by-sentence as the answer streams in, so AMA starts talking
-    // almost immediately instead of after the whole reply is written.
     let sentenceBuf = "";
     const flushSentences = (final: boolean) => {
       if (!doSpeak) return;
@@ -152,26 +105,25 @@ export function App() {
         sentenceBuf = "";
       }
     };
+    const onToken = (chunk: string) => {
+      setReply((r) => r + chunk);
+      if (doSpeak) {
+        sentenceBuf += chunk;
+        flushSentences(false);
+      }
+    };
 
     try {
-      const full = await chat(
-        model,
-        messages,
-        (chunk) => {
-          setReply((r) => r + chunk);
-          if (doSpeak) {
-            sentenceBuf += chunk;
-            flushSentences(false);
-          }
-        },
-        controller.signal,
-      );
+      if (!hasHermes) {
+        const msg = "My brain (Hermes) isn't connected — launch the desktop app so the bridge is available.";
+        setReply(msg);
+        if (doSpeak) enqueueSpeech(msg);
+        return;
+      }
+      await hermesChat(q, onToken);
       if (doSpeak) flushSentences(true);
-      setHistory((h) => [...h, { role: "assistant", content: full }]);
-    } catch (e) {
-      if ((e as Error).name === "AbortError") return;
-      const err =
-        "Something went wrong reaching the local model. Is Ollama still running?";
+    } catch {
+      const err = "Something went wrong reaching my brain. Try again?";
       setReply(err);
       if (doSpeak) enqueueSpeech(err);
     } finally {
@@ -220,7 +172,10 @@ export function App() {
         <Console
           greeting={greeting}
           listening={listening}
-          toggleListen={() => setListening((v) => !v)}
+          toggleListen={() => {
+            unlockAudio();
+            setListening((v) => !v);
+          }}
           input={input}
           setInput={setInput}
           onSend={() => ask(input)}
@@ -239,6 +194,7 @@ export function App() {
           connected={connected}
           amaSpeaking={amaSpeaking}
           voiceLoading={voiceLoading}
+          voiceLevel={voiceLevel}
         />
       )}
 
